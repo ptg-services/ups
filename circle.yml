@@ -4,7 +4,8 @@ machine:
 dependencies:
   override:
     - mvn clean package
-    - docker build -t hshira/ups:latest .
+    - docker build -t hshira/ups:latest . 
+    - docker build -t hshira/ups:${CIRCLE_BUILD_NUM} . 
 test:
   override:
     - docker run -d -p 8081:8081 hshira/ups; sleep 5
@@ -14,4 +15,4 @@ deployment:
     commands:
       - docker login -e $DOCKER_EMAIL -u $DOCKER_USER -p $DOCKER_PASS
       - docker push hshira/ups:latest
-      - docker push hshira/ups:$CIRCLE_BUILD_NUM
+      - docker push hshira/ups:${CIRCLE_BUILD_NUM}
