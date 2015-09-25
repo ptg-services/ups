@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:https="http://www.mulesoft.org/schema/mule/https" xmlns:scripting="http://www.mulesoft.org/schema/mule/scripting" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:spring="http://www.springframework.org/schema/beans" version="EE-3.5.2"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/scripting http://www.mulesoft.org/schema/mule/scripting/current/mule-scripting.xsd
+http://www.mulesoft.org/schema/mule/https http://www.mulesoft.org/schema/mule/https/current/mule-https.xsd">
+	<spring:beans>
+		<spring:bean id="parseUrl" name="parseUrl" class="com.intuit.ups.ParseURL" />
+	</spring:beans>
+	
+	<flow name="ups-proxy-flow" doc:name="ups-proxy-flow">
+		<http:inbound-endpoint exchange-pattern="request-response" host="0.0.0.0" port="8082" path="ups-service/proxy" doc:name="HTTP" />
+        <object-to-string-transformer doc:name="Object to String"/>
+        <set-variable variableName="originalPayload" value="#[payload]" doc:name="delay" />
+		<logger message="Initial payload: #[payload]" doc:name="Logger" level="INFO" />
+		<set-variable variableName="http_method" value="#[message.inboundProperties.'http.method']" doc:name="delay" />
+		<set-variable variableName="stringUrl" value="#[message.inboundProperties.'http.query.params'.endUrl]" doc:name="Variable"/>
+		<set-variable variableName="endurl" value="" doc:name="endurl" />
+		<logger message="The stringUrl is #[stringUrl.toString()]" level="INFO" doc:name="Logger" />
+		<enricher target="#[endurl]" doc:name="Source Entitlements Enricher">
+			<invoke object-ref="parseUrl" method="create" methodArguments="#[stringUrl.toString()]" doc:name="Invoke" />
+		</enricher>
+		<set-variable variableName="redirect_host" value="#[endurl.getHost()]" doc:name="host" />
+		<set-variable variableName="redirect_port" value="#[endurl.getPort()]" doc:name="port" />
+		<set-variable variableName="redirect_path" value="#[endurl.getPath()]" doc:name="path" />
+		<set-variable variableName="redirect_protocol" value="#[endurl.getProtocol()]" doc:name="delay" />
+		<set-variable variableName="delay" value="#[message.inboundProperties.'http.query.params'.ms]" doc:name="delay" />
+		<logger message="The delay requested is #[delay], the protocol is #[redirect_protocol],  the host is #[redirect_host], port is #[redirect_port], path is #[redirect_path]" level="INFO" doc:name="Logger" />
+		<flow-ref name="process-delay" doc:name="Flow Reference"/>
+		<logger message="The delay created is #[delay], the endURL is #[redirect_host]" level="INFO" doc:name="Logger" />
+		<set-payload value="#[originalPayload]"/>
+		<logger message="Sending payload: #[payload]" doc:name="Logger"/>
+		<flow-ref name="call-http-endpoint" doc:name="call-http-endpoint"/>
+	</flow>
+
+	<sub-flow name="process-delay" doc:name="process-delay">
+		<scripting:component doc:name="Groovy">
+			<scripting:script engine="Groovy"><![CDATA[java.lang.String input = message.getInvocationProperty('delay');
+				int sleeptime = 0;
+				
+				if(input.equalsIgnoreCase("random"))
+				{
+					java.util.Random rand = new java.util.Random();
+					
+					sleeptime = rand.nextInt(30001);
+					
+					message.setInvocationProperty('delay', sleeptime);
+				}
+				else
+				{
+					try
+					{
+						sleeptime = new java.lang.Integer(input);
+					
+						if(sleeptime < 0 || sleeptime > 30000)
+						{
+							throw new java.lang.NumberFormatException();
+						}
+						
+						message.setInvocationProperty('delay', sleeptime);
+					}
+					catch(java.lang.NumberFormatException e)
+					{
+						message.setInvocationProperty('delay', -1);
+					}
+				}]]>
+			</scripting:script>
+		</scripting:component>
+
+		<choice doc:name="Choice">
+			<when expression="#[delay &gt; 0]">
+				<scripting:component doc:name="Groovy">
+					<scripting:script engine="Groovy">
+						<![CDATA[int sleeptime = new java.lang.Integer(message.getInvocationProperty('delay'));
+						java.lang.Thread.sleep(sleeptime);]]>
+					</scripting:script>
+				</scripting:component>
+			</when>
+			<otherwise>
+				<logger message="Invalid delay." level="INFO" doc:name="Logger" />
+			</otherwise>
+		</choice>
+	</sub-flow>
+	<sub-flow name="call-http-endpoint" doc:name="call-http-endpoint">
+		<logger level="INFO" message="Calling HTTP endpoints" doc:name="Logger" />
+		<choice doc:name="Choice">
+			<when expression="#[http_method == 'GET']">
+				<logger message="Making a GET call to #[redirect_host]" level="INFO" doc:name="Logger" />
+				<http:outbound-endpoint exchange-pattern="request-response" host="#[redirect_host]" port="#[redirect_port]" path="#[redirect_path]" method="GET" doc:name="HTTP" />
+			</when>
+			<when expression="#[http_method == 'PUT']">
+				<logger message="Making a PUT call to #[redirect_host]" level="INFO" doc:name="Logger" />
+				<http:outbound-endpoint exchange-pattern="request-response" host="#[redirect_host]" port="#[redirect_port]" path="#[redirect_path]" method="PUT" doc:name="HTTP" />
+			</when>
+			<when expression="#[http_method == 'POST']">
+				<logger message="Making a POST call to #[redirect_host]" level="INFO" doc:name="Logger" />
+				<http:outbound-endpoint exchange-pattern="request-response" host="#[redirect_host]" port="#[redirect_port]" path="#[redirect_path]" method="POST" doc:name="HTTP" />
+			</when>
+			<when expression="#[http_method == 'DELETE']">
+				<logger message="Making a DELETE call to #[redirect_host]" level="INFO" doc:name="Logger" />
+				<http:outbound-endpoint exchange-pattern="request-response" host="#[redirect_host]" port="#[redirect_port]" path="#[redirect_path]" method="DELETE" doc:name="HTTP" />
+			</when>
+			<otherwise>
+				<logger message="Method NOT supported. Unable to call #[redirect_host]" level="INFO" doc:name="Logger" />
+			</otherwise>
+		</choice>
+		<logger message="Response from HTTP call #[message]" level="INFO" doc:name="Logger" />
+		<logger message="Payload from HTTP call #[payload]" level="INFO" doc:name="Logger" />
+	</sub-flow>
+	<sub-flow name="call-https-endpoint" doc:name="call-https-endpoint">
+		<logger level="INFO" message="Calling HTTPS endpoints" doc:name="Logger" />
+		<choice doc:name="Choice">
+			<when expression="#[http_method == 'GET']">
+				<logger message="Making a GET call to #[redirect_host]" level="INFO" doc:name="Logger" />
+				<https:outbound-endpoint exchange-pattern="request-response" host="#[redirect_host]" port="#[redirect_port]" path="#[redirect_path]" method="GET" doc:name="HTTP" />
+			</when>
+			<when expression="#[http_method == 'PUT']">
+				<logger message="Making a PUT call to #[redirect_host]" level="INFO" doc:name="Logger" />
+				<https:outbound-endpoint exchange-pattern="request-response" host="#[redirect_host]" port="#[redirect_port]" path="#[redirect_path]" method="PUT" doc:name="HTTP" />
+			</when>
+			<when expression="#[http_method == 'POST']">
+				<logger message="Making a POST call to #[redirect_host]" level="INFO" doc:name="Logger" />
+				<https:outbound-endpoint exchange-pattern="request-response" host="#[redirect_host]" port="#[redirect_port]" path="#[redirect_path]" method="POST" doc:name="HTTP" />
+			</when>
+			<when expression="#[http_method == 'DELETE']">
+				<logger message="Making a DELETE call to #[redirect_host]" level="INFO" doc:name="Logger" />
+				<https:outbound-endpoint exchange-pattern="request-response" host="#[redirect_host]" port="#[redirect_port]" path="#[redirect_path]" method="DELETE" doc:name="HTTP" />
+			</when>
+			<otherwise>
+				<logger message="Method NOT supported. Unable to call #[redirect_host]" level="INFO" doc:name="Logger" />
+			</otherwise>
+			
+		</choice>
+	</sub-flow>
+
+</mule>

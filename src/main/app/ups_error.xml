@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:scripting="http://www.mulesoft.org/schema/mule/scripting" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:spring="http://www.springframework.org/schema/beans" version="EE-3.7.0"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/scripting http://www.mulesoft.org/schema/mule/scripting/current/mule-scripting.xsd">
+	<flow name="ups_errorFlow1" >
+		<http:inbound-endpoint exchange-pattern="request-response" host="0.0.0.0" port="8082" path="ups-service/error" doc:name="HTTP" />
+		<set-variable variableName="errorCode" value="#[message.inboundProperties.'http.query.params'.errorCode]" doc:name="Variable" />
+		<set-variable variableName="endurl" value="#[message.inboundProperties.'http.query.params'.endUrl]" doc:name="Variable" />
+		<logger message="The endURL is #[endurl], The errorCode is #[errorCode]" level="INFO" doc:name="Logger" />
+		<flow-ref name="process-error" doc:name="Flow Reference"/>
+	</flow>
+
+	<sub-flow name="process-error">
+		<scripting:component doc:name="Groovy">
+			<scripting:script engine="Groovy"><![CDATA[java.lang.String input = message.getInvocationProperty('errorCode');
+int error = 0;
+
+if(input.equalsIgnoreCase("random"))
+{
+	java.util.Random rand = new java.util.Random();
+	
+	error = rand.nextInt(200) + 400;
+	
+	message.setInvocationProperty('errorCode', error);
+}
+else
+{
+	try
+	{
+		error = new java.lang.Integer(input);
+		
+		if(error < 400 || error > 599)
+		{
+			throw new java.lang.NumberFormatException(); 
+		}
+		
+		message.setInvocationProperty('errorCode', error);
+	}
+	catch(java.lang.NumberFormatException e)
+	{
+		message.setInvocationProperty('errorCode', -1);
+	}
+}
+]]></scripting:script>
+		</scripting:component>
+		<choice doc:name="Choice">
+			<when expression="#[errorCode &gt; 0]">
+				<http:response-builder status="#[errorCode]" doc:name="HTTP Response Builder" />
+			</when>
+			<otherwise>
+				<logger message="Invalid error code" level="INFO" doc:name="Logger" />
+			</otherwise>
+			<!-- <otherwise> <logger message="Invalid error code" level="INFO" doc:name="Logger"/> </otherwise> -->
+		</choice>
+
+	</sub-flow>
+</mule>
